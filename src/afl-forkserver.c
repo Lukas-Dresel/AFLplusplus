@@ -965,6 +965,18 @@ void afl_fsrv_start(afl_forkserver_t *fsrv, char **argv,
 
     }
 
+    uint32_t recved_constant = 0;
+    uint32_t start_constant = 0x4269dead;
+    if (read(fsrv->fsrv_st_fd, &recved_constant, 4) != 4) {
+        FATAL("Reading from forkserver failed.");
+    }
+    if (recved_constant != start_constant) {
+        FATAL("Forkserver did not send the start constant.");
+    }
+    if (write(fsrv->fsrv_ctl_fd, &start_constant, 4) != 4) {
+        FATAL("Writing to forkserver failed.");
+    }
+
     return;
 
   }

@@ -1117,6 +1117,22 @@ static void __afl_start_forkserver(void) {
 
   }
 
+  uint32_t start_constant = 0x4269dead;
+  uint32_t received_constant = 0;
+  if (write(FORKSRV_FD + 1, &start_constant, 4) != 4) {
+    write(2, "Error: could not send START constant\n", strlen("Error: could not send START constant\n"));
+    _exit(1);
+  }
+  if (read(FORKSRV_FD, &received_constant, 4) != 4) {
+    write(2, "Error: could not receive START constant\n", strlen("Error: could not receive START constant\n"));
+    _exit(1);
+  }
+
+  if (start_constant != received_constant) {
+    write(2, "Error: START constant mismatch!\n", strlen("Error: START constant mismatch!\n"));
+    _exit(1);
+  }
+
   while (1) {
 
     int status;
