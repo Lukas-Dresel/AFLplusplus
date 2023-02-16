@@ -69,6 +69,28 @@ __attribute__((weak)) int LLVMFuzzerInitialize(int *argc, char ***argv);
 int                       LLVMFuzzerRunDriver(int *argc, char ***argv,
                                               int (*callback)(const uint8_t *data, size_t size));
 
+
+__attribute((weak)) unsigned char default_buf[0x1000];
+__attribute((weak)) unsigned int default_buf_valid_bytes = 0;
+
+__attribute((weak)) unsigned char* __afl_fuzz_ptr;
+__attribute((weak)) unsigned int* __afl_fuzz_len;
+__attribute((weak)) void __afl_manual_init() {
+  __afl_fuzz_ptr = default_buf;
+  __afl_fuzz_len = &default_buf_valid_bytes;
+  default_buf_valid_bytes = 0;
+}
+__attribute((weak)) int __afl_persistent_loop(unsigned int max_cnt) {
+  if (default_buf_valid_bytes != 0) {
+    return 0;
+  }
+  int num_read = read(0, __afl_fuzz_ptr, 0x1000);
+  assert(num_read >= 0);
+  *__afl_fuzz_len = num_read;
+  return num_read != 0; // if the read returned nothing, don't do anything
+}
+
+
 // Default nop ASan hooks for manual poisoning when not linking the ASan
 // runtime
 // https://github.com/google/sanitizers/wiki/AddressSanitizerManualPoisoning
