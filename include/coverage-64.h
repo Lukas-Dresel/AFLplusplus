@@ -23,9 +23,9 @@ inline u64 classify_word(u64 word) {
 
 }
 
-void simplify_trace(afl_state_t *afl, u8 *bytes) {
+void simplify_trace(afl_state_t *afl, u32 *values) {
 
-  u64 *mem = (u64 *)bytes;
+  u32 *mem = (u32 *)values;
   u32  i = (afl->fsrv.map_size >> 3);
 
   while (i--) {

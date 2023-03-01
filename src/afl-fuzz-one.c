@@ -3408,7 +3408,7 @@ static u8 mopt_common_fuzzing(afl_state_t *afl, MOpt_globals_t MOpt_globals) {
 
     if (!afl->non_instrumented_mode && (afl->stage_cur & 7) == 7) {
 
-      u64 cksum = hash64(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
+      u64 cksum = hash64((u8*)afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
 
       if (afl->stage_cur == afl->stage_max - 1 && cksum == prev_cksum) {
 
@@ -3606,7 +3606,7 @@ static u8 mopt_common_fuzzing(afl_state_t *afl, MOpt_globals_t MOpt_globals) {
 
       if (!afl->non_instrumented_mode && len >= EFF_MIN_LEN) {
 
-        cksum = hash64(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
+        cksum = hash64((u8*)afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
 
       } else {
 

@@ -68,7 +68,7 @@ typedef struct {
   void (*nyx_option_apply)(void *qemu_process);
   void (*nyx_set_afl_input)(void *qemu_process, uint8_t *buffer, uint32_t size);
   enum NyxReturnValue (*nyx_exec)(void *qemu_process);
-  uint8_t *(*nyx_get_bitmap_buffer)(void *qemu_process);
+  uint32_t *(*nyx_get_bitmap_buffer)(void *qemu_process);
   size_t (*nyx_get_bitmap_buffer_size)(void *qemu_process);
   uint32_t (*nyx_get_aux_string)(void *nyx_process, uint8_t *buffer,
                                  uint32_t size);
@@ -81,7 +81,7 @@ typedef struct afl_forkserver {
 
   /* a program that includes afl-forkserver needs to define these */
 
-  u8 *trace_bits;                       /* SHM with instrumentation bitmap  */
+  u32 *trace_bits;                       /* SHM with instrumentation bitmap  */
 
   s32 fsrv_pid,                         /* PID of the fork server           */
       child_pid,                        /* PID of the fuzzed program        */

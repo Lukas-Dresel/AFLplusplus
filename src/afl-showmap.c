@@ -69,8 +69,8 @@ static u8 *in_dir = NULL,              /* input folder                      */
 
 static u8 outfile[PATH_MAX];
 
-static u8 *in_data,                    /* Input data                        */
-    *coverage_map;                     /* Coverage map                      */
+static u8 *in_data;                    /* Input data                        */
+static u32 *coverage_map;                     /* Coverage map                      */
 
 static u64 total;                      /* tuple content information         */
 static u32 tcnt, highest;              /* tuple content information         */
@@ -136,9 +136,11 @@ static void kill_child() {
 
 }
 
+#define MASK_NO_REACHABLE_BITS (~(3 << 30))
+#define MASK_REACHABLE_BITS (3 << 30)
 static void classify_counts(afl_forkserver_t *fsrv) {
 
-  u8       *mem = fsrv->trace_bits;
+  u32       *mem = fsrv->trace_bits;
   const u8 *map = binary_mode ? count_class_binary : count_class_human;
 
   u32 i = map_size;
@@ -147,7 +149,7 @@ static void classify_counts(afl_forkserver_t *fsrv) {
 
     while (i--) {
 
-      if (*mem) { *mem = 1; }
+      if (*mem & MASK_NO_REACHABLE_BITS) { *mem = 1; } // and out the edge and function reachable bits
       mem++;
 
     }
@@ -155,8 +157,9 @@ static void classify_counts(afl_forkserver_t *fsrv) {
   } else if (!raw_instr_output) {
 
     while (i--) {
-
-      *mem = map[*mem];
+      u32 bucketed = map[*mem & MASK_NO_REACHABLE_BITS];
+      bucketed |= (*mem & MASK_REACHABLE_BITS); // OR in the edge and function reachable bits
+      *mem = bucketed;
       mem++;
 
     }
@@ -201,10 +204,11 @@ static void analyze_results(afl_forkserver_t *fsrv) {
   u32 i;
   for (i = 0; i < map_size; i++) {
 
-    if (fsrv->trace_bits[i]) {
+    if (fsrv->trace_bits[i] & MASK_NO_REACHABLE_BITS) {
 
-      total += fsrv->trace_bits[i];
-      if (fsrv->trace_bits[i] > highest) highest = fsrv->trace_bits[i];
+      u32 count = fsrv->trace_bits[i] & MASK_NO_REACHABLE_BITS;
+      total += count;
+      if (count > highest) highest = count;
       if (!coverage_map[i]) { coverage_map[i] = 1; }
 
     }
@@ -281,20 +285,20 @@ static u32 write_results_to_file(afl_forkserver_t *fsrv, u8 *outfile) {
     if (!f) { PFATAL("fdopen() failed"); }
 
     for (i = 0; i < map_size; i++) {
-
-      if (!fsrv->trace_bits[i]) { continue; }
+      u32 count = fsrv->trace_bits[i] & MASK_NO_REACHABLE_BITS;
+      if (!count) { continue; }
       ret++;
 
-      total += fsrv->trace_bits[i];
-      if (highest < fsrv->trace_bits[i]) { highest = fsrv->trace_bits[i]; }
+      total += count;
+      if (highest < count) { highest = count; }
 
       if (cmin_mode) {
 
-        fprintf(f, "%u%u\n", fsrv->trace_bits[i], i);
+        fprintf(f, "%u%u\n", count, i);
 
       } else {
 
-        fprintf(f, "%06u:%u\n", i, fsrv->trace_bits[i]);
+        fprintf(f, "%06u:%u\n", i, count);
 
       }
 
@@ -1131,7 +1135,7 @@ int main(int argc, char **argv_orig, char **envp) {
   set_up_environment(fsrv, argv);
 
   fsrv->target_path = find_binary(argv[optind]);
-  fsrv->trace_bits = afl_shm_init(&shm, map_size, 0);
+  fsrv->trace_bits = (u32*)afl_shm_init(&shm, map_size, 0);
 
   if (!quiet_mode) {
 
@@ -1279,7 +1283,7 @@ int main(int argc, char **argv_orig, char **envp) {
         afl_shm_deinit(&shm);
         afl_fsrv_kill(fsrv);
         fsrv->map_size = new_map_size;
-        fsrv->trace_bits = afl_shm_init(&shm, new_map_size, 0);
+        fsrv->trace_bits = (u32*)afl_shm_init(&shm, new_map_size, 0);
 
       }
 
@@ -1326,7 +1330,7 @@ int main(int argc, char **argv_orig, char **envp) {
 
     } else {
 
-      if ((coverage_map = (u8 *)malloc(map_size + 64)) == NULL)
+      if ((coverage_map = (u32 *)malloc(map_size * 4 + 64)) == NULL)
         FATAL("coult not grab memory");
       edges_only = false;
       raw_instr_output = true;
@@ -1391,7 +1395,7 @@ int main(int argc, char **argv_orig, char **envp) {
     if (!quiet_mode) {
 
       OKF("Hash of coverage map: %llx",
-          hash64(fsrv->trace_bits, fsrv->map_size, HASH_CONST));
+          hash64((u8*)fsrv->trace_bits, fsrv->map_size, HASH_CONST));
 
     }
 

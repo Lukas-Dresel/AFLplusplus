@@ -261,7 +261,6 @@ static int ExecuteFilesOnyByOne(int argc, char **argv,
       printf("Reading %zu bytes from %s\n", length, argv[i]);
       callback(buf, length);
       printf("Execution successful.\n");
-
     }
 
     if (fd > 0) { close(fd); }

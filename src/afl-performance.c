@@ -86,7 +86,7 @@ inline double rand_next_percent(afl_state_t *afl) {
 u32 hash32(u8 *key, u32 len, u32 seed) {
 
 #else
-inline u32 hash32(u8 *key, u32 len, u32 seed) {
+inline u32 hash32(void *key, u32 len, u32 seed) {
 
 #endif
 
@@ -99,7 +99,7 @@ inline u32 hash32(u8 *key, u32 len, u32 seed) {
 u64 hash64(u8 *key, u32 len, u64 seed) {
 
 #else
-inline u64 hash64(u8 *key, u32 len, u64 seed) {
+inline u64 hash64(void *key, u32 len, u64 seed) {
 
 #endif
 

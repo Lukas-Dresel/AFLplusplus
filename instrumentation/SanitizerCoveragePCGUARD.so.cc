@@ -10,6 +10,9 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include <llvm-12/llvm/IR/BasicBlock.h>
+#include <llvm-12/llvm/IR/Constants.h>
+#include <llvm-12/llvm/IR/Verifier.h>
 #include "llvm/Transforms/Instrumentation/SanitizerCoverage.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallVector.h"
@@ -206,6 +209,11 @@ class ModuleSanitizerCoverageAFL
   GlobalVariable *AFLMapPtr = NULL;
   ConstantInt    *One = NULL;
   ConstantInt    *Zero = NULL;
+  ConstantInt    *EdgeReachableBit32 = NULL;
+  ConstantInt    *FunctionReachableBit32 = NULL;
+
+  ConstantInt    *One32 = NULL;
+  ConstantInt    *Zero32 = NULL;
 
 };
 
@@ -400,6 +408,11 @@ bool ModuleSanitizerCoverageAFL::instrumentModule(
                          GlobalValue::ExternalLinkage, 0, "__afl_area_ptr");
   One = ConstantInt::get(IntegerType::getInt8Ty(Ctx), 1);
   Zero = ConstantInt::get(IntegerType::getInt8Ty(Ctx), 0);
+
+  One32 = ConstantInt::get(IntegerType::getInt32Ty(Ctx), 1);
+  Zero32 = ConstantInt::get(IntegerType::getInt32Ty(Ctx), 0);
+  EdgeReachableBit32 = ConstantInt::get(IntegerType::getInt32Ty(Ctx), 1 << 31);
+  FunctionReachableBit32 = ConstantInt::get(IntegerType::getInt32Ty(Ctx), 1 << 30);
 
   SanCovTracePCIndir =
       M.getOrInsertFunction(SanCovTracePCIndirName, VoidTy, IntptrTy);
@@ -658,8 +671,11 @@ void ModuleSanitizerCoverageAFL::instrumentFunction(
   bool                     IsLeafFunc = true;
 
   for (auto &BB : F) {
-
-    if (shouldInstrumentBlock(F, &BB, DT, PDT, Options))
+    bool shouldInstrument = shouldInstrumentBlock(F, &BB, DT, PDT, Options);
+    // errs() << "shouldInstrumentBlock: " << shouldInstrument << " for " << BB.getName() << "\n";
+    // BB.print(errs());
+    // errs() << "\n\n\n";
+    if (shouldInstrument)
       BlocksToInstrument.push_back(&BB);
     for (auto &Inst : BB) {
 
@@ -1148,8 +1164,94 @@ bool ModuleSanitizerCoverageAFL::InjectCoverage(
   if (AllBlocks.empty() && !special && !local_selects) return false;
 
   if (!AllBlocks.empty())
-    for (size_t i = 0, N = AllBlocks.size(); i < N; i++)
-      InjectCoverageAtBlock(F, *AllBlocks[i], i, IsLeafFunc);
+      for (size_t i = 0, N = AllBlocks.size(); i < N; i++)
+          InjectCoverageAtBlock(F, *AllBlocks[i], i, IsLeafFunc);
+
+
+
+
+
+
+  auto FindBBIndex = [&](const BasicBlock *BB) -> long {
+    auto It = std::find(AllBlocks.begin(), AllBlocks.end(), BB);
+    if (It == AllBlocks.end()) {
+      // error out with a message and details of all basic blocks and the one we're looking for
+      // errs() << "Error: Could not find basic block " << BB->getName() << " in function " << F.getName() << "\n";
+      // errs() << "Basic block " << BB->getName() << ":\n";
+      // errs() << "  ";
+      // BB->print(errs());
+      // errs() << "\n\n\n";
+      // errs() << "######################################################\n";
+      // errs() << "All basic blocks in function " << F.getName() << ":\n";
+      // for (auto &BB : F) {
+      //   errs() << "  " << BB.getName() << "\n";
+      //   errs() << "    ";
+      //   BB.print(errs());
+      //   errs() << "\n\n";
+      // }
+      // errs() << "######################################################\n";
+      // now abort out
+      return -1;
+    }
+    return It - AllBlocks.begin();
+  };
+
+  // SetBit creation function takes an IRBuilder, a guardptr and a bitvalue to or in
+  auto SetBasicBlockBit = [&](IRBuilder<> &IRB, const BasicBlock* BB, Value* BitValue) {
+    auto BBIndex = FindBBIndex(BB);
+    if (BBIndex < 0) return;
+
+    LoadInst *MapPtr = IRB.CreateLoad(PointerType::get(Int32Ty, 0), AFLMapPtr);
+    ModuleSanitizerCoverageAFL::SetNoSanitizeMetadata(MapPtr);
+
+    /* Load counter for CurLoc */
+
+    auto GuardPtr = IRB.CreateIntToPtr(
+              IRB.CreateAdd(
+                  IRB.CreatePointerCast(FunctionGuardArray, IntptrTy),
+                  ConstantInt::get(IntptrTy, (special + BBIndex) * 4)),
+              Int32PtrTy);
+    LoadInst *edgeId = IRB.CreateLoad(IRB.getInt32Ty(), GuardPtr);
+    ModuleSanitizerCoverageAFL::SetNoSanitizeMetadata(edgeId);
+
+    Value *MapPtrIdx = IRB.CreateGEP(Int32Ty, MapPtr, edgeId);
+    LoadInst *edgeCount = IRB.CreateLoad(IRB.getInt32Ty(), MapPtrIdx);
+    ModuleSanitizerCoverageAFL::SetNoSanitizeMetadata(edgeCount);
+
+    Value *Incr = IRB.CreateOr(edgeCount, BitValue);
+    StoreInst *StoreCtx = IRB.CreateStore(Incr, MapPtrIdx);
+    ModuleSanitizerCoverageAFL::SetNoSanitizeMetadata(StoreCtx);
+  };
+
+  if (verifyFunction(F, &errs())) {
+    errs() << "Error: Function " << F.getName() << " failed verification\n";
+    F.dump();
+    return false;
+  }
+
+  if (!AllBlocks.empty()) {
+
+    for (size_t i = 0, N = AllBlocks.size(); i < N; i++) {
+      BasicBlock &BB = *AllBlocks[i];
+
+      IRBuilder<> IRBEntry(&*F.getEntryBlock().getFirstInsertionPt());
+      SetBasicBlockBit(IRBEntry, &BB, FunctionReachableBit32);
+    }
+
+    for (auto &BB : F) {
+      if (succ_begin(&BB) == succ_end(&BB)) continue;
+
+      IRBuilder<> IRB(&*BB.getFirstInsertionPt());
+      for (const BasicBlock *SUCC : make_range(succ_begin(&BB), succ_end(&BB))) {
+        SetBasicBlockBit(IRB, SUCC, EdgeReachableBit32);
+      }
+    }
+  }
+  if (verifyFunction(F, &errs())) {
+    errs() << "Error: Function " << F.getName() << " failed verification\n";
+    F.dump();
+    return false;
+  }
 
   return true;
 
@@ -1350,12 +1452,12 @@ void ModuleSanitizerCoverageAFL::InjectCoverageAtBlock(Function   &F,
 
     /* Load SHM pointer */
 
-    LoadInst *MapPtr = IRB.CreateLoad(PointerType::get(Int8Ty, 0), AFLMapPtr);
+    LoadInst *MapPtr = IRB.CreateLoad(PointerType::get(Int32Ty, 0), AFLMapPtr);
     ModuleSanitizerCoverageAFL::SetNoSanitizeMetadata(MapPtr);
 
     /* Load counter for CurLoc */
 
-    Value *MapPtrIdx = IRB.CreateGEP(Int8Ty, MapPtr, CurLoc);
+    Value *MapPtrIdx = IRB.CreateGEP(Int32Ty, MapPtr, CurLoc);
 
     if (use_threadsafe_counters) {
 
@@ -1367,17 +1469,16 @@ void ModuleSanitizerCoverageAFL::InjectCoverageAtBlock(Function   &F,
 
     } else {
 
-      LoadInst *Counter = IRB.CreateLoad(IRB.getInt8Ty(), MapPtrIdx);
+      LoadInst *Counter = IRB.CreateLoad(IRB.getInt32Ty(), MapPtrIdx);
       ModuleSanitizerCoverageAFL::SetNoSanitizeMetadata(Counter);
 
       /* Update bitmap */
-
-      Value *Incr = IRB.CreateAdd(Counter, One);
+      Value *Incr = IRB.CreateAdd(Counter, One32);
 
       if (skip_nozero == NULL) {
 
-        auto cf = IRB.CreateICmpEQ(Incr, Zero);
-        auto carry = IRB.CreateZExt(cf, Int8Ty);
+        auto cf = IRB.CreateICmpEQ(Incr, Zero32);
+        auto carry = IRB.CreateZExt(cf, Int32Ty);
         Incr = IRB.CreateAdd(Incr, carry);
 
       }
@@ -1445,7 +1546,6 @@ void ModuleSanitizerCoverageAFL::InjectCoverageAtBlock(Function   &F,
     SetNoSanitizeMetadata(Store);
 
   }
-
 }
 
 std::string ModuleSanitizerCoverageAFL::getSectionName(
@@ -1482,4 +1582,3 @@ std::string ModuleSanitizerCoverageAFL::getSectionEnd(
   return "__stop___" + Section;
 
 }
-

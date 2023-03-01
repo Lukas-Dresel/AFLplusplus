@@ -24,6 +24,7 @@
  */
 
 #include "afl-fuzz.h"
+#include "coverage_state_bits.h"
 #include <limits.h>
 #if !defined NAME_MAX
   #define NAME_MAX _XOPEN_NAME_MAX
@@ -89,8 +90,7 @@ u32 count_bits(afl_state_t *afl, u8 *mem) {
    mostly to update the status screen or calibrate and examine confirmed
    new paths. */
 
-u32 count_bytes(afl_state_t *afl, u8 *mem) {
-
+u32 count_bytes(afl_state_t *afl, u32 *mem) {
   u32 *ptr = (u32 *)mem;
   u32  i = ((afl->fsrv.real_map_size + 3) >> 2);
   u32  ret = 0;
@@ -99,11 +99,8 @@ u32 count_bytes(afl_state_t *afl, u8 *mem) {
 
     u32 v = *(ptr++);
 
-    if (likely(!v)) { continue; }
-    if (v & 0x000000ffU) { ++ret; }
-    if (v & 0x0000ff00U) { ++ret; }
-    if (v & 0x00ff0000U) { ++ret; }
-    if (v & 0xff000000U) { ++ret; }
+    if (likely(!v) || v & MASK_NO_REACHABLE_BITS == 0) { continue; }
+    ++ret;
 
   }
 
@@ -250,7 +247,7 @@ inline u8 has_new_bits(afl_state_t *afl, u8 *virgin_map) {
 inline u8 has_new_bits_unclassified(afl_state_t *afl, u8 *virgin_map) {
 
   /* Handle the hot path first: no new coverage */
-  u8 *end = afl->fsrv.trace_bits + afl->fsrv.map_size;
+  u8 *end = (void*)afl->fsrv.trace_bits + afl->fsrv.map_size;
 
 #ifdef WORD_SIZE_64
 
@@ -272,13 +269,13 @@ inline u8 has_new_bits_unclassified(afl_state_t *afl, u8 *virgin_map) {
    count information here. This is called only sporadically, for some
    new paths. */
 
-void minimize_bits(afl_state_t *afl, u8 *dst, u8 *src) {
+void minimize_bits(afl_state_t *afl, u8 *dst, u32 *src) {
 
   u32 i = 0;
 
-  while (i < afl->fsrv.map_size) {
+  while (i < afl->fsrv.map_size / 4) {
 
-    if (*(src++)) { dst[i >> 3] |= 1 << (i & 7); }
+    if (*(src++) & MASK_NO_REACHABLE_BITS) { dst[i >> 3] |= 1 << (i & 7); }
     ++i;
 
   }
