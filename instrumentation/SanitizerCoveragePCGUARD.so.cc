@@ -1072,7 +1072,7 @@ bool ModuleSanitizerCoverageAFL::InjectCoverage(
         /* Load SHM pointer */
 
         LoadInst *MapPtr =
-            IRB.CreateLoad(PointerType::get(Int8Ty, 0), AFLMapPtr);
+            IRB.CreateLoad(PointerType::get(Int32Ty, 0), AFLMapPtr);
         ModuleSanitizerCoverageAFL::SetNoSanitizeMetadata(MapPtr);
 
         /*
@@ -1093,7 +1093,7 @@ bool ModuleSanitizerCoverageAFL::InjectCoverage(
 
             CurLoc = IRB.CreateLoad(IRB.getInt32Ty(), result);
             ModuleSanitizerCoverageAFL::SetNoSanitizeMetadata(CurLoc);
-            MapPtrIdx = IRB.CreateGEP(Int8Ty, MapPtr, CurLoc);
+            MapPtrIdx = IRB.CreateGEP(Int32Ty, MapPtr, CurLoc);
 
           } else {
 
@@ -1101,7 +1101,7 @@ bool ModuleSanitizerCoverageAFL::InjectCoverage(
             auto elementptr = IRB.CreateIntToPtr(element, Int32PtrTy);
             auto elementld = IRB.CreateLoad(IRB.getInt32Ty(), elementptr);
             ModuleSanitizerCoverageAFL::SetNoSanitizeMetadata(elementld);
-            MapPtrIdx = IRB.CreateGEP(Int8Ty, MapPtr, elementld);
+            MapPtrIdx = IRB.CreateGEP(Int32Ty, MapPtr, elementld);
 
           }
 
@@ -1115,19 +1115,18 @@ bool ModuleSanitizerCoverageAFL::InjectCoverage(
 
           } else {
 
-            LoadInst *Counter = IRB.CreateLoad(IRB.getInt8Ty(), MapPtrIdx);
+            LoadInst *Counter = IRB.CreateLoad(IRB.getInt32Ty(), MapPtrIdx);
             ModuleSanitizerCoverageAFL::SetNoSanitizeMetadata(Counter);
 
             /* Update bitmap */
 
-            Value *Incr = IRB.CreateAdd(Counter, One);
+            Value *Incr = IRB.CreateAdd(Counter, One32);
 
             if (skip_nozero == NULL) {
 
-              auto cf = IRB.CreateICmpEQ(Incr, Zero);
-              auto carry = IRB.CreateZExt(cf, Int8Ty);
+              auto cf = IRB.CreateICmpEQ(Incr, Zero32);
+              auto carry = IRB.CreateZExt(cf, Int32Ty);
               Incr = IRB.CreateAdd(Incr, carry);
-
             }
 
             StoreInst *StoreCtx = IRB.CreateStore(Incr, MapPtrIdx);
