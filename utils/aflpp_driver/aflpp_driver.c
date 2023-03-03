@@ -54,6 +54,10 @@ $AFL_HOME/afl-fuzz -i IN -o OUT ./a.out
 #include "types.h"
 #include "cmplog.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #ifdef _DEBUG
   #include "hash.h"
 #endif
@@ -63,6 +67,7 @@ extern unsigned int  *__afl_fuzz_len;
 extern unsigned char *__afl_fuzz_ptr;
 
 // libFuzzer interface is thin, so we don't include any libFuzzer headers.
+
 __attribute__((weak)) int LLVMFuzzerTestOneInput(const uint8_t *Data,
                                                  size_t         Size);
 __attribute__((weak)) int LLVMFuzzerInitialize(int *argc, char ***argv);
@@ -416,3 +421,6 @@ int LLVMFuzzerRunDriver(int *argcp, char ***argvp,
 
 }
 
+#ifdef __cplusplus
+}
+#endif
