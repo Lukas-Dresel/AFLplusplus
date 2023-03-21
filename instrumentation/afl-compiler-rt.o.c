@@ -380,10 +380,10 @@ static void __afl_map_shm(void) {
 
     } else {
 
-      if (__afl_first_final_loc > MAP_INITIAL_SIZE) {
+      if (__afl_first_final_loc * 4 > MAP_INITIAL_SIZE) {
 
         // done in second stage constructor
-        __afl_map_size = __afl_first_final_loc;
+        __afl_map_size = __afl_first_final_loc * 4;
 
       } else {
 
