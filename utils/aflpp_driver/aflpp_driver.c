@@ -76,6 +76,7 @@ __attribute__((weak)) int LLVMFuzzerTestOneInput(const uint8_t *Data,
 __attribute__((weak)) int LLVMFuzzerInitialize(int *argc, char ***argv);
 __attribute__((weak)) int LLVMFuzzerRunDriver(int *argc, char ***argv,
                                               int (*callback)(const uint8_t *data, size_t size));
+__attribute__((weak)) size_t LLVMFuzzerMutate(uint8_t *Data, size_t Size, size_t MaxSize);
 
 
 __attribute((weak)) unsigned char default_buf[0x1000];
@@ -221,7 +222,7 @@ static void maybe_close_fd_mask() {
 
 // Define LLVMFuzzerMutate to avoid link failures for targets that use it
 // with libFuzzer's LLVMFuzzerCustomMutator.
-size_t LLVMFuzzerMutate(uint8_t *Data, size_t Size, size_t MaxSize) {
+__attribute__((weak)) size_t LLVMFuzzerMutate(uint8_t *Data, size_t Size, size_t MaxSize) {
 
   // assert(false && "LLVMFuzzerMutate should not be called from afl_driver");
   return 0;
