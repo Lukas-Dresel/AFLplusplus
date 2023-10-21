@@ -24,6 +24,7 @@
 #endif
 #include "llvm/IR/Constant.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/Verifier.h"
 #if LLVM_VERSION_MAJOR < 15
   #include "llvm/IR/DebugInfo.h"
 #endif
@@ -200,6 +201,11 @@ class ModuleSanitizerCoverageAFL
   ConstantInt    *One = NULL;
   ConstantInt    *Zero = NULL;
 
+  ConstantInt    *EdgeReachableBit32 = NULL;
+  ConstantInt    *FunctionReachableBit32 = NULL;
+  ConstantInt    *One32 = NULL;
+  ConstantInt    *Zero32 = NULL;
+
 };
 
 }  // namespace
@@ -371,6 +377,12 @@ bool ModuleSanitizerCoverageAFL::instrumentModule(
                          GlobalValue::ExternalLinkage, 0, "__afl_area_ptr");
   One = ConstantInt::get(IntegerType::getInt8Ty(Ctx), 1);
   Zero = ConstantInt::get(IntegerType::getInt8Ty(Ctx), 0);
+
+  EdgeReachableBit32 = ConstantInt::get(IntegerType::getInt32Ty(Ctx), 1 << 31);
+  FunctionReachableBit32 =
+      ConstantInt::get(IntegerType::getInt32Ty(Ctx), 1 << 30);
+  One32 = ConstantInt::get(IntegerType::getInt32Ty(Ctx), 1);
+  Zero32 = ConstantInt::get(IntegerType::getInt32Ty(Ctx), 0);
 
   // Make sure smaller parameters are zero-extended to i64 if required by the
   // target ABI.
@@ -954,7 +966,7 @@ bool ModuleSanitizerCoverageAFL::InjectCoverage(
         /* Load SHM pointer */
 
         LoadInst *MapPtr =
-            IRB.CreateLoad(PointerType::get(Int8Ty, 0), AFLMapPtr);
+            IRB.CreateLoad(PointerType::get(Int32Ty, 0), AFLMapPtr);
         ModuleSanitizerCoverageAFL::SetNoSanitizeMetadata(MapPtr);
 
         while (1) {
@@ -968,7 +980,7 @@ bool ModuleSanitizerCoverageAFL::InjectCoverage(
 
             CurLoc = IRB.CreateLoad(IRB.getInt32Ty(), result);
             ModuleSanitizerCoverageAFL::SetNoSanitizeMetadata(CurLoc);
-            MapPtrIdx = IRB.CreateGEP(Int8Ty, MapPtr, CurLoc);
+            MapPtrIdx = IRB.CreateGEP(Int32Ty, MapPtr, CurLoc);
 
           } else {
 
@@ -976,7 +988,7 @@ bool ModuleSanitizerCoverageAFL::InjectCoverage(
             auto elementptr = IRB.CreateIntToPtr(element, Int32PtrTy);
             auto elementld = IRB.CreateLoad(IRB.getInt32Ty(), elementptr);
             ModuleSanitizerCoverageAFL::SetNoSanitizeMetadata(elementld);
-            MapPtrIdx = IRB.CreateGEP(Int8Ty, MapPtr, elementld);
+            MapPtrIdx = IRB.CreateGEP(Int32Ty, MapPtr, elementld);
 
           }
 
@@ -990,17 +1002,17 @@ bool ModuleSanitizerCoverageAFL::InjectCoverage(
 
           } else {
 
-            LoadInst *Counter = IRB.CreateLoad(IRB.getInt8Ty(), MapPtrIdx);
+            LoadInst *Counter = IRB.CreateLoad(IRB.getInt32Ty(), MapPtrIdx);
             ModuleSanitizerCoverageAFL::SetNoSanitizeMetadata(Counter);
 
             /* Update bitmap */
 
-            Value *Incr = IRB.CreateAdd(Counter, One);
+            Value *Incr = IRB.CreateAdd(Counter, One32);
 
             if (skip_nozero == NULL) {
 
-              auto cf = IRB.CreateICmpEQ(Incr, Zero);
-              auto carry = IRB.CreateZExt(cf, Int8Ty);
+              auto cf = IRB.CreateICmpEQ(Incr, Zero32);
+              auto carry = IRB.CreateZExt(cf, Int32Ty);
               Incr = IRB.CreateAdd(Incr, carry);
 
             }
@@ -1041,6 +1053,71 @@ bool ModuleSanitizerCoverageAFL::InjectCoverage(
   if (!AllBlocks.empty())
     for (size_t i = 0, N = AllBlocks.size(); i < N; i++)
       InjectCoverageAtBlock(F, *AllBlocks[i], i, IsLeafFunc);
+
+  auto FindBBIndex = [&](const BasicBlock *BB) -> long {
+    auto It = std::find(AllBlocks.begin(), AllBlocks.end(), BB);
+    if (It == AllBlocks.end()) {
+      return -1;
+    }
+    return It - AllBlocks.begin();
+  };
+
+  // SetBit creation function takes an IRBuilder, a guardptr and a bitvalue to or in
+  auto SetBasicBlockBit = [&](IRBuilder<> &IRB, const BasicBlock* BB, Value* BitValue) {
+    auto BBIndex = FindBBIndex(BB);
+    if (BBIndex < 0) return;
+
+    LoadInst *MapPtr = IRB.CreateLoad(PointerType::get(Int32Ty, 0), AFLMapPtr);
+    ModuleSanitizerCoverageAFL::SetNoSanitizeMetadata(MapPtr);
+
+    /* Load counter for CurLoc */
+
+    auto GuardPtr = IRB.CreateIntToPtr(
+              IRB.CreateAdd(
+                  IRB.CreatePointerCast(FunctionGuardArray, IntptrTy),
+                  ConstantInt::get(IntptrTy, (special + BBIndex) * 4)),
+              Int32PtrTy);
+    LoadInst *edgeId = IRB.CreateLoad(IRB.getInt32Ty(), GuardPtr);
+    ModuleSanitizerCoverageAFL::SetNoSanitizeMetadata(edgeId);
+
+    Value *MapPtrIdx = IRB.CreateGEP(Int32Ty, MapPtr, edgeId);
+    LoadInst *edgeCount = IRB.CreateLoad(IRB.getInt32Ty(), MapPtrIdx);
+    ModuleSanitizerCoverageAFL::SetNoSanitizeMetadata(edgeCount);
+
+    Value *Incr = IRB.CreateOr(edgeCount, BitValue);
+    StoreInst *StoreCtx = IRB.CreateStore(Incr, MapPtrIdx);
+    ModuleSanitizerCoverageAFL::SetNoSanitizeMetadata(StoreCtx);
+  };
+
+  if (llvm::verifyFunction(F, &errs())) {
+    errs() << "Error: Function " << F.getName() << " failed verification\n";
+    F.dump();
+    return false;
+  }
+
+  if (!AllBlocks.empty()) {
+
+    for (size_t i = 0, N = AllBlocks.size(); i < N; i++) {
+      BasicBlock &BB = *AllBlocks[i];
+
+      IRBuilder<> IRBEntry(&*F.getEntryBlock().getFirstInsertionPt());
+      SetBasicBlockBit(IRBEntry, &BB, FunctionReachableBit32);
+    }
+
+    for (auto &BB : F) {
+      if (succ_begin(&BB) == succ_end(&BB)) continue;
+
+      IRBuilder<> IRB(&*BB.getFirstInsertionPt());
+      for (const BasicBlock *SUCC : make_range(succ_begin(&BB), succ_end(&BB))) {
+        SetBasicBlockBit(IRB, SUCC, EdgeReachableBit32);
+      }
+    }
+  }
+  if (llvm::verifyFunction(F, &errs())) {
+    errs() << "Error: Function " << F.getName() << " failed verification\n";
+    F.dump();
+    return false;
+  }
 
   return true;
 
@@ -1200,16 +1277,16 @@ void ModuleSanitizerCoverageAFL::InjectCoverageAtBlock(Function   &F,
 
     /* Load SHM pointer */
 
-    LoadInst *MapPtr = IRB.CreateLoad(PointerType::get(Int8Ty, 0), AFLMapPtr);
+    LoadInst *MapPtr = IRB.CreateLoad(PointerType::get(Int32Ty, 0), AFLMapPtr);
     ModuleSanitizerCoverageAFL::SetNoSanitizeMetadata(MapPtr);
 
     /* Load counter for CurLoc */
 
-    Value *MapPtrIdx = IRB.CreateGEP(Int8Ty, MapPtr, CurLoc);
+    Value *MapPtrIdx = IRB.CreateGEP(Int32Ty, MapPtr, CurLoc);
 
     if (use_threadsafe_counters) {
 
-      IRB.CreateAtomicRMW(llvm::AtomicRMWInst::BinOp::Add, MapPtrIdx, One,
+      IRB.CreateAtomicRMW(llvm::AtomicRMWInst::BinOp::Add, MapPtrIdx, One32,
 #if LLVM_VERSION_MAJOR >= 13
                           llvm::MaybeAlign(1),
 #endif
@@ -1217,17 +1294,17 @@ void ModuleSanitizerCoverageAFL::InjectCoverageAtBlock(Function   &F,
 
     } else {
 
-      LoadInst *Counter = IRB.CreateLoad(IRB.getInt8Ty(), MapPtrIdx);
+      LoadInst *Counter = IRB.CreateLoad(IRB.getInt32Ty(), MapPtrIdx);
       ModuleSanitizerCoverageAFL::SetNoSanitizeMetadata(Counter);
 
       /* Update bitmap */
 
-      Value *Incr = IRB.CreateAdd(Counter, One);
+      Value *Incr = IRB.CreateAdd(Counter, One32);
 
       if (skip_nozero == NULL) {
 
-        auto cf = IRB.CreateICmpEQ(Incr, Zero);
-        auto carry = IRB.CreateZExt(cf, Int8Ty);
+        auto cf = IRB.CreateICmpEQ(Incr, Zero32);
+        auto carry = IRB.CreateZExt(cf, Int32Ty);
         Incr = IRB.CreateAdd(Incr, carry);
 
       }

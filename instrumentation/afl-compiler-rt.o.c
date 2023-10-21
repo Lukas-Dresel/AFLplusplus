@@ -92,11 +92,11 @@ extern ssize_t _kern_write(int fd, off_t pos, const void *buffer,
                            size_t bufferSize);
 #endif  // HAIKU
 
-static u8  __afl_area_initial[MAP_INITIAL_SIZE];
-static u8 *__afl_area_ptr_dummy = __afl_area_initial;
-static u8 *__afl_area_ptr_backup = __afl_area_initial;
+static u32  __afl_area_initial[MAP_INITIAL_SIZE];
+static u32 *__afl_area_ptr_dummy = __afl_area_initial;
+static u32 *__afl_area_ptr_backup = __afl_area_initial;
 
-u8        *__afl_area_ptr = __afl_area_initial;
+u32        *__afl_area_ptr = __afl_area_initial;
 u8        *__afl_dictionary;
 u8        *__afl_fuzz_ptr;
 static u32 __afl_fuzz_len_dummy;
@@ -223,14 +223,14 @@ void __afl_trace(const u32 x) {
   PREV_LOC_T prev = __afl_prev_loc[0];
   __afl_prev_loc[0] = (x >> 1);
 
-  u8 *p = &__afl_area_ptr[prev ^ x];
+  u32 *p = &__afl_area_ptr[prev ^ x];
 
 #if 1                                      /* enable for neverZero feature. */
   #if __GNUC__
-  u8 c = __builtin_add_overflow(*p, 1, p);
+  u32 c = __builtin_add_overflow(*p, 1, p);
   *p += c;
   #else
-  *p += 1 + ((u8)(1 + *p) == 0);
+  *p += 1 + ((u32)(1 + *p) == 0);
   #endif
 #else
   ++*p;
@@ -333,7 +333,7 @@ static void __afl_map_shm(void) {
 
   if (__afl_final_loc) {
 
-    __afl_map_size = ++__afl_final_loc;  // as we count starting 0
+    __afl_map_size = (++__afl_final_loc) * 4;  // as we count starting 0
 
     if (getenv("AFL_DUMP_MAP_SIZE")) {
 
@@ -342,20 +342,20 @@ static void __afl_map_shm(void) {
 
     }
 
-    if (__afl_final_loc > MAP_SIZE) {
+    if (__afl_final_loc * 4 > MAP_SIZE) {
 
       char *ptr;
       u32   val = 0;
       if ((ptr = getenv("AFL_MAP_SIZE")) != NULL) { val = atoi(ptr); }
-      if (val < __afl_final_loc) {
+      if (val < __afl_final_loc * 4) {
 
-        if (__afl_final_loc > FS_OPT_MAX_MAPSIZE) {
+        if (__afl_final_loc * 4 > FS_OPT_MAX_MAPSIZE) {
 
           if (!getenv("AFL_QUIET"))
             fprintf(stderr,
                     "Error: AFL++ tools *require* to set AFL_MAP_SIZE to %u "
                     "to be able to run this instrumented program!\n",
-                    __afl_final_loc);
+                    __afl_final_loc * 4);
 
           if (id_str) {
 
@@ -366,13 +366,13 @@ static void __afl_map_shm(void) {
 
         } else {
 
-          if (__afl_final_loc > MAP_INITIAL_SIZE && !getenv("AFL_QUIET")) {
+          if (__afl_final_loc * 4 > MAP_INITIAL_SIZE && !getenv("AFL_QUIET")) {
 
             fprintf(stderr,
                     "Warning: AFL++ tools might need to set AFL_MAP_SIZE to %u "
                     "to be able to run this instrumented program if this "
                     "crashes!\n",
-                    __afl_final_loc);
+                    __afl_final_loc * 4);
 
           }
 
@@ -422,10 +422,10 @@ static void __afl_map_shm(void) {
 
     } else {
 
-      if (__afl_first_final_loc > MAP_INITIAL_SIZE) {
+      if (__afl_first_final_loc * 4 > MAP_INITIAL_SIZE) {
 
         // done in second stage constructor
-        __afl_map_size = __afl_first_final_loc;
+        __afl_map_size = __afl_first_final_loc * 4;
 
       } else {
 
@@ -435,9 +435,9 @@ static void __afl_map_shm(void) {
 
     }
 
-    if (__afl_map_size > MAP_INITIAL_SIZE && __afl_final_loc < __afl_map_size) {
+    if (__afl_map_size > MAP_INITIAL_SIZE && __afl_final_loc * 4 < __afl_map_size) {
 
-      __afl_final_loc = __afl_map_size;
+      __afl_final_loc = __afl_map_size / 4;
 
     }
 
@@ -474,7 +474,7 @@ static void __afl_map_shm(void) {
 
       if (__afl_map_addr) {
 
-        munmap((void *)__afl_map_addr, __afl_final_loc);
+        munmap((void *)__afl_map_addr, __afl_final_loc * 4);
 
       } else {
 
@@ -549,7 +549,7 @@ static void __afl_map_shm(void) {
 
     }
 
-    __afl_area_ptr = (u8 *)shmat(shm_id, (void *)__afl_map_addr, 0);
+    __afl_area_ptr = (u32 *)shmat(shm_id, (void *)__afl_map_addr, 0);
 
     /* Whooooops. */
 
@@ -576,7 +576,7 @@ static void __afl_map_shm(void) {
 
              __afl_map_addr) {
 
-    __afl_area_ptr = (u8 *)mmap(
+    __afl_area_ptr = (u32 *)mmap(
         (void *)__afl_map_addr, __afl_map_size, PROT_READ | PROT_WRITE,
         MAP_FIXED_NOREPLACE | MAP_SHARED | MAP_ANONYMOUS, -1, 0);
 
@@ -589,7 +589,7 @@ static void __afl_map_shm(void) {
 
     }
 
-  } else if (__afl_final_loc > MAP_INITIAL_SIZE &&
+  } else if (__afl_final_loc * 4 > MAP_INITIAL_SIZE &&
 
              __afl_final_loc > __afl_first_final_loc) {
 
@@ -599,7 +599,7 @@ static void __afl_map_shm(void) {
 
     }
 
-    __afl_area_ptr_dummy = (u8 *)malloc(__afl_final_loc);
+    __afl_area_ptr_dummy = (u32 *)malloc(__afl_final_loc);
     __afl_area_ptr = __afl_area_ptr_dummy;
     __afl_map_size = __afl_final_loc;
 
@@ -1192,6 +1192,22 @@ static void __afl_start_forkserver(void) {
 
   }
 
+  uint32_t start_constant = 0x4269dead;
+  uint32_t received_constant = 0;
+  if (write(FORKSRV_FD + 1, &start_constant, 4) != 4) {
+    write(2, "Error: could not send START constant\n", strlen("Error: could not send START constant\n"));
+    _exit(1);
+  }
+  if (read(FORKSRV_FD, &received_constant, 4) != 4) {
+    write(2, "Error: could not receive START constant\n", strlen("Error: could not receive START constant\n"));
+    _exit(1);
+  }
+
+  if (start_constant != received_constant) {
+    write(2, "Error: START constant mismatch!\n", strlen("Error: START constant mismatch!\n"));
+    _exit(1);
+  }
+
   while (1) {
 
     int status;
@@ -1475,9 +1491,9 @@ __attribute__((constructor(1))) void __afl_auto_second(void) {
   }
 
   if (getenv("AFL_DISABLE_LLVM_INSTRUMENTATION")) return;
-  u8 *ptr;
+  u32 *ptr;
 
-  if (__afl_final_loc > MAP_INITIAL_SIZE) {
+  if (__afl_final_loc * 4 > MAP_INITIAL_SIZE) {
 
     __afl_first_final_loc = __afl_final_loc + 1;
 
@@ -1485,11 +1501,11 @@ __attribute__((constructor(1))) void __afl_auto_second(void) {
       free(__afl_area_ptr);
 
     if (__afl_map_addr)
-      ptr = (u8 *)mmap((void *)__afl_map_addr, __afl_first_final_loc,
+      ptr = (u32 *)mmap((void *)__afl_map_addr, __afl_first_final_loc * 4,
                        PROT_READ | PROT_WRITE,
                        MAP_FIXED_NOREPLACE | MAP_SHARED | MAP_ANONYMOUS, -1, 0);
     else
-      ptr = (u8 *)malloc(__afl_first_final_loc);
+      ptr = (u32 *)malloc(__afl_first_final_loc * 4);
 
     if (ptr && (ssize_t)ptr != -1) {
 
@@ -1878,12 +1894,12 @@ void __sanitizer_cov_trace_pc_guard_init(uint32_t *start, uint32_t *stop) {
 
   if (__afl_already_initialized_shm) {
 
-    if (__afl_final_loc > __afl_map_size) {
+    if (__afl_final_loc * 4> __afl_map_size) {
 
       if (__afl_debug) {
 
         fprintf(stderr, "Reinit shm necessary (+%u)\n",
-                __afl_final_loc - __afl_map_size);
+                __afl_final_loc * 4 - __afl_map_size);
 
       }
 
