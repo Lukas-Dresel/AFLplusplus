@@ -65,12 +65,17 @@ extern "C" {
 #endif
 
 // AFL++ shared memory fuzz cases
+__attribute__((weak))
 int                   __afl_sharedmem_fuzzing = 1;
+__attribute__((weak))
 extern unsigned int  *__afl_fuzz_len;
+__attribute__((weak))
 extern unsigned char *__afl_fuzz_ptr;
 
 // AFL++ coverage map
+__attribute__((weak))
 extern unsigned char *__afl_area_ptr;
+__attribute__((weak))
 extern unsigned int   __afl_map_size;
 
 // libFuzzer interface is thin, so we don't include any libFuzzer headers.
@@ -82,6 +87,28 @@ extern unsigned int   __afl_map_size;
 __attribute__((weak)) int     LLVMFuzzerInitialize(int *argc, char ***argv);
 __attribute__((weak)) int     LLVMFuzzerRunDriver(
         int *argc, char ***argv, int (*callback)(const uint8_t *data, size_t size));
+__attribute__((weak)) size_t LLVMFuzzerMutate(uint8_t *Data, size_t Size, size_t MaxSize);
+
+
+__attribute((weak)) unsigned char default_buf[0x1000];
+__attribute((weak)) unsigned int default_buf_valid_bytes = 0;
+
+__attribute((weak)) unsigned char* __afl_fuzz_ptr;
+__attribute((weak)) unsigned int* __afl_fuzz_len;
+__attribute((weak)) void __afl_manual_init() {
+  __afl_fuzz_ptr = default_buf;
+  __afl_fuzz_len = &default_buf_valid_bytes;
+  default_buf_valid_bytes = 0;
+}
+__attribute((weak)) int __afl_persistent_loop(unsigned int max_cnt) {
+  if (default_buf_valid_bytes != 0) {
+    return 0;
+  }
+  int num_read = read(0, __afl_fuzz_ptr, 0x1000);
+  assert(num_read >= 0);
+  *__afl_fuzz_len = num_read;
+  return num_read != 0; // if the read returned nothing, don't do anything
+}
 
 // Default nop ASan hooks for manual poisoning when not linking the ASan
 // runtime
@@ -232,7 +259,7 @@ static int ExecuteFilesOnyByOne(int argc, char **argv,
     if (fd == -1) { continue; }
 
 #ifndef __HAIKU__
-    ssize_t length = syscall(SYS_read, fd, buf, MAX_FILE);
+    ssize_t length = read(fd, buf, MAX_FILE);
 #else
     ssize_t length = _kern_read(fd, buf, MAX_FILE);
 #endif  // HAIKU
