@@ -104,7 +104,7 @@ u32       *__afl_fuzz_len = &__afl_fuzz_len_dummy;
 int        __afl_sharedmem_fuzzing __attribute__((weak));
 
 u32 __afl_final_loc;
-u32 __afl_map_size = MAP_SIZE;
+u32 __afl_map_size = MAP_SIZE*4;
 u32 __afl_dictionary_len;
 u64 __afl_map_addr;
 u32 __afl_first_final_loc;
@@ -601,7 +601,7 @@ static void __afl_map_shm(void) {
 
     __afl_area_ptr_dummy = (u32 *)malloc(__afl_final_loc);
     __afl_area_ptr = __afl_area_ptr_dummy;
-    __afl_map_size = __afl_final_loc;
+    __afl_map_size = (__afl_final_loc*4);
 
     if (!__afl_area_ptr_dummy) {
 
@@ -1908,7 +1908,7 @@ void __sanitizer_cov_trace_pc_guard_init(uint32_t *start, uint32_t *stop) {
 
     }
 
-    __afl_map_size = __afl_final_loc + 1;
+    __afl_map_size = (__afl_final_loc + 1) * 4;
 
   }
 
