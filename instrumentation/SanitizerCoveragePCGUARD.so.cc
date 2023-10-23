@@ -297,17 +297,7 @@ Function *ModuleSanitizerCoverageAFL::CreateInitCallsForSections(
       M, CtorName, InitFunctionName, {PtrTy, PtrTy}, {SecStart, SecEnd});
   assert(CtorFunc->getName() == CtorName);
 
-  if (TargetTriple.supportsCOMDAT()) {
-
-    // Use comdat to dedup CtorFunc.
-    CtorFunc->setComdat(M.getOrInsertComdat(CtorName));
-    appendToGlobalCtors(M, CtorFunc, SanCtorAndDtorPriority, CtorFunc);
-
-  } else {
-
-    appendToGlobalCtors(M, CtorFunc, SanCtorAndDtorPriority);
-
-  }
+  appendToGlobalCtors(M, CtorFunc, SanCtorAndDtorPriority);
 
   if (TargetTriple.isOSBinFormatCOFF()) {
 
@@ -645,10 +635,10 @@ GlobalVariable *ModuleSanitizerCoverageAFL::CreateFunctionLocalArrayInSection(
       *CurModule, ArrayTy, false, GlobalVariable::PrivateLinkage,
       Constant::getNullValue(ArrayTy), "__sancov_gen_");
 
-  if (TargetTriple.supportsCOMDAT() &&
-      (TargetTriple.isOSBinFormatELF() || !F.isInterposable()))
-    if (auto Comdat = getOrCreateFunctionComdat(F, TargetTriple))
-      Array->setComdat(Comdat);
+  //if (TargetTriple.supportsCOMDAT() &&
+  //    (TargetTriple.isOSBinFormatELF() || !F.isInterposable()))
+  //  if (auto Comdat = getOrCreateFunctionComdat(F, TargetTriple))
+  //    Array->setComdat(Comdat);
   Array->setSection(getSectionName(Section));
 #if LLVM_VERSION_MAJOR >= 16
   Array->setAlignment(Align(DL->getTypeStoreSize(Ty).getFixedValue()));
@@ -665,10 +655,7 @@ GlobalVariable *ModuleSanitizerCoverageAFL::CreateFunctionLocalArrayInSection(
   // will be retained or discarded as a unit, so llvm.compiler.used is
   // sufficient. Otherwise, conservatively make all of them retained by the
   // linker.
-  if (Array->hasComdat())
-    GlobalsToAppendToCompilerUsed.push_back(Array);
-  else
-    GlobalsToAppendToUsed.push_back(Array);
+  GlobalsToAppendToUsed.push_back(Array);
 
   return Array;
 
