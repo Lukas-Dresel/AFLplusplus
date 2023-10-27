@@ -536,10 +536,10 @@ static void __afl_map_shm(void) {
 #else
     u32 shm_id = atoi(id_str);
 
-    if (__afl_map_size && __afl_map_size > MAP_SIZE) {
+    if (__afl_map_size && __afl_map_size > MAP_SIZE * 4) {
 
       u8 *map_env = (u8 *)getenv("AFL_MAP_SIZE");
-      if (!map_env || atoi((char *)map_env) < MAP_SIZE) {
+      if (!map_env || atoi((char *)map_env) < MAP_SIZE * 4) {
 
         fprintf(stderr, "FS_ERROR_MAP_SIZE\n");
         send_forkserver_error(FS_ERROR_MAP_SIZE);
